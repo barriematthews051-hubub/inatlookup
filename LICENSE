@@ -1,0 +1,23 @@
+# inatlookup
+
+Recover an iNaturalist observation from a photo URL.
+
+## Features
+
+- Works from photo ID or photo URL
+- Binary search over 475 million photo records
+- Uses the public iNaturalist Open Data
+- Fast lookups
+- Compact 11.4 GB index
+
+## Example
+
+Input
+
+https://static.inaturalist.org/photos/455606536/original.jpeg
+
+Output
+
+Observation ID: 254368720
+
+https://www.inaturalist.org/observations/254368720

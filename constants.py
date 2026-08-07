@@ -1,0 +1,9 @@
+import struct
+
+MAGIC = b"INATLOOK"
+
+FORMAT_VERSION = 1
+
+HEADER_SIZE = 128
+
+RECORD_SIZE = 24
