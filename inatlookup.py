@@ -2,12 +2,15 @@ import re
 import requests
 
 from lookup import InatLookup
+from version import VERSION
 
-BIN_FILE = "inatlookup.bin"
+#BIN_FILE = "inatlookup.bin"
+BIN_FILE = r"C:\Users\Barrie\inatlookup\data\inatlookup.bin"
 
 lookup = InatLookup(BIN_FILE)
 
-print(f"inatlookup index v{lookup.version}")
+print(f"inatlookup program v{VERSION}")
+print(f"Index format v{lookup.version}")
 print(f"Records : {lookup.records:,}")
 print()
 
