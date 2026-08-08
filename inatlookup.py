@@ -1,6 +1,7 @@
 import os
 import re
 import argparse
+import csv
 import requests
 
 from lookup import InatLookup
@@ -12,6 +13,8 @@ DEFAULT_INDEX = os.path.join(
     "data",
     "inatlookup.bin"
 )
+
+DEFAULT_OUTPUT = "inatlookup_results.csv"
 
 
 def extract_photo_id(text):
@@ -89,25 +92,150 @@ def lookup_photo(lookup, text):
         print(e)
 
 
+def batch_lookup(lookup, input_file, output_file):
+    """
+    Look up photo IDs from a text file and write results to CSV.
+
+    The input may contain photo IDs, iNaturalist photo URLs,
+    blank lines, or invalid lines.
+    """
+
+    total = 0
+    valid = 0
+    invalid = 0
+    found = 0
+    not_found = 0
+    observations = set()
+
+    rows = []
+
+    with open(
+        input_file,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
+        for line in f:
+
+            text = line.strip()
+
+            if not text:
+                continue
+
+            total += 1
+
+            photo_id = extract_photo_id(text)
+
+            if photo_id is None:
+
+                invalid += 1
+
+                rows.append(
+                    {
+                        "input": text,
+                        "photo_id": "",
+                        "observation_uuid": "",
+                        "status": "invalid input"
+                    }
+                )
+
+                continue
+
+            valid += 1
+
+            obs_uuid = lookup.find(photo_id)
+
+            if obs_uuid is None:
+
+                not_found += 1
+
+                rows.append(
+                    {
+                        "input": text,
+                        "photo_id": photo_id,
+                        "observation_uuid": "",
+                        "status": "not found"
+                    }
+                )
+
+                continue
+
+            found += 1
+            observations.add(obs_uuid)
+
+            rows.append(
+                {
+                    "input": text,
+                    "photo_id": photo_id,
+                    "observation_uuid": obs_uuid,
+                    "status": "found"
+                }
+            )
+
+    with open(
+        output_file,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as f:
+
+        writer = csv.DictWriter(
+            f,
+            fieldnames=[
+                "input",
+                "photo_id",
+                "observation_uuid",
+                "status"
+            ]
+        )
+
+        writer.writeheader()
+
+        writer.writerows(rows)
+
+    print()
+    print("Batch lookup complete")
+    print()
+    print(f"Input records : {total:,}")
+    print(f"Valid photos  : {valid:,}")
+    print(f"Invalid input : {invalid:,}")
+    print(f"Found in index: {found:,}")
+    print(f"Not found     : {not_found:,}")
+    print(f"Observations  : {len(observations):,}")
+    print()
+    print("Results written to:")
+    print(output_file)
+
+
 def main():
 
     parser = argparse.ArgumentParser(
         description=(
-            "Find an iNaturalist observation from a "
-            "photo ID or photo URL."
+            "Find iNaturalist observations from "
+            "photo IDs or photo URLs."
         )
     )
 
     parser.add_argument(
         "photo",
         nargs="?",
-        help="iNaturalist photo ID or photo URL"
+        help=(
+            "iNaturalist photo ID, photo URL, "
+            "or input text file"
+        )
     )
 
     parser.add_argument(
         "--index",
         default=DEFAULT_INDEX,
         help="Path to inatlookup index file"
+    )
+
+    parser.add_argument(
+        "--output",
+        "-o",
+        default=DEFAULT_OUTPUT,
+        help="Output CSV filename for batch mode"
     )
 
     parser.add_argument(
@@ -146,26 +274,39 @@ def main():
     print(f"Records : {lookup.records:,}")
     print()
 
-    # Direct command-line lookup
-    if args.photo:
+    # No argument: interactive mode
+    if not args.photo:
 
-        lookup_photo(lookup, args.photo)
+        while True:
+
+            text = input(
+                "Photo URL or Photo ID (blank to quit): "
+            ).strip()
+
+            if not text:
+                break
+
+            lookup_photo(lookup, text)
+
+            print()
+
         lookup.close()
         return
 
-    # Interactive mode
-    while True:
+    # File argument: batch mode
+    if os.path.isfile(args.photo):
 
-        text = input(
-            "Photo URL or Photo ID (blank to quit): "
-        ).strip()
+        batch_lookup(
+            lookup,
+            args.photo,
+            args.output
+        )
 
-        if not text:
-            break
+        lookup.close()
+        return
 
-        lookup_photo(lookup, text)
-
-        print()
+    # Otherwise: single-photo mode
+    lookup_photo(lookup, args.photo)
 
     lookup.close()
 

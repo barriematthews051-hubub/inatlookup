@@ -1,5 +1,7 @@
 import os
 import sys
+import tempfile
+import csv
 
 sys.path.insert(
     0,
@@ -7,7 +9,10 @@ sys.path.insert(
 )
 
 from lookup import InatLookup
-from inatlookup import extract_photo_id
+from inatlookup import (
+    extract_photo_id,
+    batch_lookup
+)
 
 
 BIN_FILE = os.path.join(
@@ -79,6 +84,80 @@ def test_invalid_input():
     print("PASS: invalid input")
 
 
+def test_batch_lookup():
+
+    input_text = (
+        "455606536\n"
+        "\n"
+        "999999999999\n"
+        "banana\n"
+        "455606536\n"
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
+        input_file = os.path.join(
+            temp_dir,
+            "photos.txt"
+        )
+
+        output_file = os.path.join(
+            temp_dir,
+            "results.csv"
+        )
+
+        with open(
+            input_file,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            f.write(input_text)
+
+        lookup = InatLookup(BIN_FILE)
+
+        batch_lookup(
+            lookup,
+            input_file,
+            output_file
+        )
+
+        lookup.close()
+
+        with open(
+            output_file,
+            "r",
+            encoding="utf-8",
+            newline=""
+        ) as f:
+
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 4
+
+        assert rows[0]["input"] == "455606536"
+        assert rows[0]["photo_id"] == "455606536"
+        assert rows[0]["observation_uuid"] == KNOWN_UUID
+        assert rows[0]["status"] == "found"
+
+        assert rows[1]["input"] == "999999999999"
+        assert rows[1]["photo_id"] == "999999999999"
+        assert rows[1]["observation_uuid"] == ""
+        assert rows[1]["status"] == "not found"
+        
+        assert rows[2]["input"] == "banana"
+        assert rows[2]["photo_id"] == ""
+        assert rows[2]["observation_uuid"] == ""
+        assert rows[2]["status"] == "invalid input"
+
+        assert rows[3]["input"] == "455606536"
+        assert rows[3]["photo_id"] == "455606536"
+        assert rows[3]["observation_uuid"] == KNOWN_UUID
+        assert rows[3]["status"] == "found"
+
+    print("PASS: batch lookup")
+
+
 if __name__ == "__main__":
 
     test_known_photo()
@@ -86,5 +165,6 @@ if __name__ == "__main__":
     test_photo_id_input()
     test_photo_url_input()
     test_invalid_input()
+    test_batch_lookup()
 
     print("All tests passed")
