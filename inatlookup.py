@@ -3,6 +3,7 @@ import re
 import argparse
 import csv
 import requests
+from dataclasses import dataclass
 
 from lookup import InatLookup
 from version import VERSION
@@ -15,6 +16,18 @@ DEFAULT_INDEX = os.path.join(
 )
 
 DEFAULT_OUTPUT = "inatlookup_results.csv"
+
+
+@dataclass
+class BatchResult:
+    total: int
+    valid: int
+    invalid: int
+    unique_photos: int
+    found: int
+    not_found: int
+    unique_observations: int
+    rows: list
 
 
 def extract_photo_id(text):
@@ -92,15 +105,11 @@ def lookup_photo(lookup, text):
         print(e)
 
 
-def batch_lookup(lookup, input_file, output_file):
+def batch_lookup(lookup, input_file):
     """
-    Look up photo IDs from a text file and write results to CSV.
+    Look up photo IDs from a text file.
 
-    The input may contain photo IDs, iNaturalist photo URLs,
-    blank lines, or invalid lines.
-
-    Duplicate photo IDs remain as separate output rows, but
-    are counted only once in the unique-photo statistics.
+    Returns a BatchResult containing statistics and output rows.
     """
 
     total = 0
@@ -178,6 +187,23 @@ def batch_lookup(lookup, input_file, output_file):
                 }
             )
 
+    return BatchResult(
+        total=total,
+        valid=valid,
+        invalid=invalid,
+        unique_photos=len(unique_photo_ids),
+        found=found,
+        not_found=not_found,
+        unique_observations=len(observations),
+        rows=rows
+    )
+
+
+def write_batch_csv(result, output_file):
+    """
+    Write a BatchResult to a CSV file.
+    """
+
     with open(
         output_file,
         "w",
@@ -196,18 +222,24 @@ def batch_lookup(lookup, input_file, output_file):
         )
 
         writer.writeheader()
-        writer.writerows(rows)
+        writer.writerows(result.rows)
+
+
+def print_batch_summary(result, output_file):
+    """
+    Display a BatchResult summary.
+    """
 
     print()
     print("Batch lookup complete")
     print()
-    print(f"Input records      : {total:,}")
-    print(f"Valid inputs       : {valid:,}")
-    print(f"Invalid input      : {invalid:,}")
-    print(f"Unique photos      : {len(unique_photo_ids):,}")
-    print(f"Found in index     : {found:,}")
-    print(f"Not found          : {not_found:,}")
-    print(f"Unique observations: {len(observations):,}")
+    print(f"Input records      : {result.total:,}")
+    print(f"Valid inputs       : {result.valid:,}")
+    print(f"Invalid input      : {result.invalid:,}")
+    print(f"Unique photos      : {result.unique_photos:,}")
+    print(f"Found in index     : {result.found:,}")
+    print(f"Not found          : {result.not_found:,}")
+    print(f"Unique observations: {result.unique_observations:,}")
     print()
     print("Results written to:")
     print(output_file)
@@ -302,9 +334,18 @@ def main():
     # File argument: batch mode
     if os.path.isfile(args.photo):
 
-        batch_lookup(
+        result = batch_lookup(
             lookup,
-            args.photo,
+            args.photo
+        )
+
+        write_batch_csv(
+            result,
+            args.output
+        )
+
+        print_batch_summary(
+            result,
             args.output
         )
 

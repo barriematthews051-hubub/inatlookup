@@ -11,7 +11,8 @@ sys.path.insert(
 from lookup import InatLookup
 from inatlookup import (
     extract_photo_id,
-    batch_lookup
+    batch_lookup,
+    write_batch_csv
 )
 
 
@@ -116,13 +117,47 @@ def test_batch_lookup():
 
         lookup = InatLookup(BIN_FILE)
 
-        batch_lookup(
+        result = batch_lookup(
             lookup,
-            input_file,
-            output_file
+            input_file
         )
 
         lookup.close()
+
+        assert result.total == 4
+        assert result.valid == 3
+        assert result.invalid == 1
+        assert result.unique_photos == 2
+        assert result.found == 2
+        assert result.not_found == 1
+        assert result.unique_observations == 1
+
+        assert len(result.rows) == 4
+
+        assert result.rows[0]["input"] == "455606536"
+        assert result.rows[0]["photo_id"] == 455606536
+        assert result.rows[0]["observation_uuid"] == KNOWN_UUID
+        assert result.rows[0]["status"] == "found"
+
+        assert result.rows[1]["input"] == "999999999999"
+        assert result.rows[1]["photo_id"] == 999999999999
+        assert result.rows[1]["observation_uuid"] == ""
+        assert result.rows[1]["status"] == "not found"
+
+        assert result.rows[2]["input"] == "banana"
+        assert result.rows[2]["photo_id"] == ""
+        assert result.rows[2]["observation_uuid"] == ""
+        assert result.rows[2]["status"] == "invalid input"
+
+        assert result.rows[3]["input"] == "455606536"
+        assert result.rows[3]["photo_id"] == 455606536
+        assert result.rows[3]["observation_uuid"] == KNOWN_UUID
+        assert result.rows[3]["status"] == "found"
+
+        write_batch_csv(
+            result,
+            output_file
+        )
 
         with open(
             output_file,
@@ -135,8 +170,6 @@ def test_batch_lookup():
 
         assert len(rows) == 4
 
-        assert rows[0]["photo_id"] == "455606536"
-        assert rows[3]["photo_id"] == "455606536"
         assert rows[0]["input"] == "455606536"
         assert rows[0]["photo_id"] == "455606536"
         assert rows[0]["observation_uuid"] == KNOWN_UUID
@@ -146,7 +179,7 @@ def test_batch_lookup():
         assert rows[1]["photo_id"] == "999999999999"
         assert rows[1]["observation_uuid"] == ""
         assert rows[1]["status"] == "not found"
-        
+
         assert rows[2]["input"] == "banana"
         assert rows[2]["photo_id"] == ""
         assert rows[2]["observation_uuid"] == ""
@@ -157,7 +190,7 @@ def test_batch_lookup():
         assert rows[3]["observation_uuid"] == KNOWN_UUID
         assert rows[3]["status"] == "found"
 
-    print("PASS: batch lookup")
+    print("PASS: batch result object")
 
 
 if __name__ == "__main__":
