@@ -35,7 +35,7 @@ def main():
 
     lookup = InatLookup(args.index)
 
-    print(f"inatlookup program v{VERSION}")
+    print(f"inatlookup - Fast Reverse Lookup v{VERSION}")
     print(f"Index format v{lookup.version}")
     print(f"Records : {lookup.records:,}")
     print()
