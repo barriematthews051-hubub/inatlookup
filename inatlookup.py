@@ -98,6 +98,9 @@ def batch_lookup(lookup, input_file, output_file):
 
     The input may contain photo IDs, iNaturalist photo URLs,
     blank lines, or invalid lines.
+
+    Duplicate photo IDs remain as separate output rows, but
+    are counted only once in the unique-photo statistics.
     """
 
     total = 0
@@ -105,6 +108,8 @@ def batch_lookup(lookup, input_file, output_file):
     invalid = 0
     found = 0
     not_found = 0
+
+    unique_photo_ids = set()
     observations = set()
 
     rows = []
@@ -142,6 +147,7 @@ def batch_lookup(lookup, input_file, output_file):
                 continue
 
             valid += 1
+            unique_photo_ids.add(photo_id)
 
             obs_uuid = lookup.find(photo_id)
 
@@ -190,18 +196,18 @@ def batch_lookup(lookup, input_file, output_file):
         )
 
         writer.writeheader()
-
         writer.writerows(rows)
 
     print()
     print("Batch lookup complete")
     print()
-    print(f"Input records : {total:,}")
-    print(f"Valid photos  : {valid:,}")
-    print(f"Invalid input : {invalid:,}")
-    print(f"Found in index: {found:,}")
-    print(f"Not found     : {not_found:,}")
-    print(f"Observations  : {len(observations):,}")
+    print(f"Input records      : {total:,}")
+    print(f"Valid inputs       : {valid:,}")
+    print(f"Invalid input      : {invalid:,}")
+    print(f"Unique photos      : {len(unique_photo_ids):,}")
+    print(f"Found in index     : {found:,}")
+    print(f"Not found          : {not_found:,}")
+    print(f"Unique observations: {len(observations):,}")
     print()
     print("Results written to:")
     print(output_file)

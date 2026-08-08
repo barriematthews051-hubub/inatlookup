@@ -135,6 +135,8 @@ def test_batch_lookup():
 
         assert len(rows) == 4
 
+        assert rows[0]["photo_id"] == "455606536"
+        assert rows[3]["photo_id"] == "455606536"
         assert rows[0]["input"] == "455606536"
         assert rows[0]["photo_id"] == "455606536"
         assert rows[0]["observation_uuid"] == KNOWN_UUID
