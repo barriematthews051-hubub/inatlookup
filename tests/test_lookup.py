@@ -1,35 +1,33 @@
-import sys
 import os
+import sys
 
 sys.path.insert(
     0,
-    os.path.dirname(
-        os.path.dirname(__file__)
-    )
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 )
 
 from lookup import InatLookup
+from inatlookup import extract_photo_id
 
 
-#BIN_FILE = "inatlookup.bin"
-BIN_FILE = r"C:\Users\Barrie\inatlookup\data\inatlookup.bin"
+BIN_FILE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data",
+    "inatlookup.bin"
+)
+
+
+KNOWN_PHOTO_ID = 455606536
+KNOWN_UUID = "9bcb94d0-cf6f-4ab0-9c5b-7301685acdb9"
 
 
 def test_known_photo():
 
     lookup = InatLookup(BIN_FILE)
 
-    photo_id = 455606536
+    result = lookup.find(KNOWN_PHOTO_ID)
 
-    expected = (
-        "9bcb94d0-cf6f-4ab0-9c5b-7301685acdb9"
-    )
-
-    result = lookup.find(photo_id)
-
-    assert result == expected, (
-        f"Expected {expected}, got {result}"
-    )
+    assert result == KNOWN_UUID
 
     lookup.close()
 
@@ -49,9 +47,44 @@ def test_missing_photo():
     print("PASS: missing photo lookup")
 
 
+def test_photo_id_input():
+
+    result = extract_photo_id("455606536")
+
+    assert result == 455606536
+
+    print("PASS: photo ID input")
+
+
+def test_photo_url_input():
+
+    url = (
+        "https://static.inaturalist.org/"
+        "photos/455606536/original.jpeg"
+    )
+
+    result = extract_photo_id(url)
+
+    assert result == 455606536
+
+    print("PASS: photo URL input")
+
+
+def test_invalid_input():
+
+    result = extract_photo_id("banana")
+
+    assert result is None
+
+    print("PASS: invalid input")
+
+
 if __name__ == "__main__":
 
     test_known_photo()
     test_missing_photo()
+    test_photo_id_input()
+    test_photo_url_input()
+    test_invalid_input()
 
     print("All tests passed")
