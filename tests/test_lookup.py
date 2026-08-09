@@ -27,6 +27,19 @@ KNOWN_PHOTO_ID = 455606536
 KNOWN_UUID = "9bcb94d0-cf6f-4ab0-9c5b-7301685acdb9"
 
 
+class CountingLookup:
+    def __init__(self):
+        self.calls = 0
+
+    def find(self, photo_id):
+        self.calls += 1
+
+        if photo_id == KNOWN_PHOTO_ID:
+            return KNOWN_UUID
+
+        return None
+
+
 def test_known_photo():
 
     lookup = InatLookup(BIN_FILE)
@@ -194,6 +207,52 @@ def test_batch_lookup():
     print("PASS: batch result object and cache")
 
 
+def test_duplicate_cache():
+
+    input_text = (
+        "455606536\n"
+        "455606536\n"
+        "455606536\n"
+        "999999999999\n"
+        "999999999999\n"
+    )
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
+        input_file = os.path.join(
+            temp_dir,
+            "photos.txt"
+        )
+
+        with open(
+            input_file,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            f.write(input_text)
+
+        lookup = CountingLookup()
+
+        result = batch_lookup(
+            lookup,
+            input_file
+        )
+
+        assert result.total == 5
+        assert result.valid == 5
+        assert result.invalid == 0
+        assert result.unique_photos == 2
+        assert result.index_lookups == 2
+        assert result.found == 3
+        assert result.not_found == 2
+        assert result.unique_observations == 1
+
+        assert lookup.calls == 2
+
+        print("PASS: duplicate lookup cache")
+
+
 if __name__ == "__main__":
 
     test_known_photo()
@@ -202,5 +261,7 @@ if __name__ == "__main__":
     test_photo_url_input()
     test_invalid_input()
     test_batch_lookup()
+    test_duplicate_cache()
+
 
     print("All tests passed")
