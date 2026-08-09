@@ -253,6 +253,20 @@ def test_duplicate_cache():
         print("PASS: duplicate lookup cache")
 
 
+def test_lookup_context_manager():
+
+    with InatLookup(BIN_FILE) as lookup:
+
+        result = lookup.find(KNOWN_PHOTO_ID)
+
+        assert result == KNOWN_UUID
+        assert not lookup.f.closed
+
+    assert lookup.f.closed
+
+    print("PASS: lookup context manager")
+
+
 if __name__ == "__main__":
 
     test_known_photo()
@@ -262,6 +276,6 @@ if __name__ == "__main__":
     test_invalid_input()
     test_batch_lookup()
     test_duplicate_cache()
-
+    test_lookup_context_manager()
 
     print("All tests passed")

@@ -1,4 +1,5 @@
 import struct
+import uuid
 
 from header import read_header
 
@@ -22,6 +23,12 @@ class InatLookup:
 
     def close(self):
         self.f.close()
+        
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()   
 
     def find(self, photo_id):
 
@@ -46,17 +53,7 @@ class InatLookup:
 
             if pid == photo_id:
 
-                uuid = data[8:]
-
-                uuid = (
-                    uuid[:4].hex() + "-" +
-                    uuid[4:6].hex() + "-" +
-                    uuid[6:8].hex() + "-" +
-                    uuid[8:10].hex() + "-" +
-                    uuid[10:].hex()
-                )
-
-                return uuid
+                return str(uuid.UUID(bytes=data[8:]))
 
             if pid < photo_id:
                 low = mid + 1
