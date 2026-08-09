@@ -1,5 +1,3 @@
-import struct
-
 MAGIC = b"INATLOOK"
 
 FORMAT_VERSION = 1
