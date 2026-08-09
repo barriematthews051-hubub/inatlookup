@@ -24,6 +24,7 @@ class BatchResult:
     valid: int
     invalid: int
     unique_photos: int
+    index_lookups: int
     found: int
     not_found: int
     unique_observations: int
@@ -109,17 +110,23 @@ def batch_lookup(lookup, input_file):
     """
     Look up photo IDs from a text file.
 
+    Duplicate photo IDs are cached so the binary index
+    is queried only once for each unique photo ID.
+
     Returns a BatchResult containing statistics and output rows.
     """
 
     total = 0
     valid = 0
     invalid = 0
+    index_lookups = 0
     found = 0
     not_found = 0
 
     unique_photo_ids = set()
     observations = set()
+
+    photo_cache = {}
 
     rows = []
 
@@ -158,7 +165,15 @@ def batch_lookup(lookup, input_file):
             valid += 1
             unique_photo_ids.add(photo_id)
 
-            obs_uuid = lookup.find(photo_id)
+            if photo_id in photo_cache:
+
+                obs_uuid = photo_cache[photo_id]
+
+            else:
+
+                obs_uuid = lookup.find(photo_id)
+                photo_cache[photo_id] = obs_uuid
+                index_lookups += 1
 
             if obs_uuid is None:
 
@@ -192,6 +207,7 @@ def batch_lookup(lookup, input_file):
         valid=valid,
         invalid=invalid,
         unique_photos=len(unique_photo_ids),
+        index_lookups=index_lookups,
         found=found,
         not_found=not_found,
         unique_observations=len(observations),
@@ -237,6 +253,7 @@ def print_batch_summary(result, output_file):
     print(f"Valid inputs       : {result.valid:,}")
     print(f"Invalid input      : {result.invalid:,}")
     print(f"Unique photos      : {result.unique_photos:,}")
+    print(f"Index lookups      : {result.index_lookups:,}")
     print(f"Found in index     : {result.found:,}")
     print(f"Not found          : {result.not_found:,}")
     print(f"Unique observations: {result.unique_observations:,}")

@@ -128,6 +128,7 @@ def test_batch_lookup():
         assert result.valid == 3
         assert result.invalid == 1
         assert result.unique_photos == 2
+        assert result.index_lookups == 2
         assert result.found == 2
         assert result.not_found == 1
         assert result.unique_observations == 1
@@ -190,7 +191,7 @@ def test_batch_lookup():
         assert rows[3]["observation_uuid"] == KNOWN_UUID
         assert rows[3]["status"] == "found"
 
-    print("PASS: batch result object")
+    print("PASS: batch result object and cache")
 
 
 if __name__ == "__main__":
