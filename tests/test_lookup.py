@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import csv
+import struct
 
 sys.path.insert(
     0,
@@ -267,6 +268,147 @@ def test_lookup_context_manager():
     print("PASS: lookup context manager")
 
 
+def test_invalid_header_version():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+
+        header = bytearray(128)
+
+        header[0:8] = b"INATLOOK"
+
+        struct.pack_into(
+            "<I",
+            header,
+            8,
+            999
+        )
+
+        f.write(header)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected unsupported version error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Unsupported index format version: 999"
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: invalid header version")
+
+
+def test_invalid_record_size():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+
+        header = bytearray(128)
+
+        header[0:8] = b"INATLOOK"
+
+        struct.pack_into(
+            "<I",
+            header,
+            8,
+            1
+        )
+
+        struct.pack_into(
+            "<I",
+            header,
+            24,
+            999
+        )
+
+        f.write(header)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected unsupported record size error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Unsupported record size: 999"
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: invalid record size")
+
+
+def test_invalid_header_size():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+
+        header = bytearray(128)
+
+        header[0:8] = b"INATLOOK"
+
+        struct.pack_into(
+            "<I",
+            header,
+            8,
+            1
+        )
+
+        struct.pack_into(
+            "<I",
+            header,
+            24,
+            24
+        )
+
+        struct.pack_into(
+            "<I",
+            header,
+            28,
+            999
+        )
+
+        f.write(header)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected unsupported header size error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Unsupported header size: 999"
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: invalid header size")
+
+
 if __name__ == "__main__":
 
     test_known_photo()
@@ -277,5 +419,8 @@ if __name__ == "__main__":
     test_batch_lookup()
     test_duplicate_cache()
     test_lookup_context_manager()
+    test_invalid_header_version()
+    test_invalid_record_size()
+    test_invalid_header_size()
 
-    print("All tests passed")
+print("All tests passed")

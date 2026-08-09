@@ -70,11 +70,26 @@ def read_header(f):
 
     version = struct.unpack_from("<I", header, 8)[0]
 
+    if version != FORMAT_VERSION:
+        raise RuntimeError(
+            f"Unsupported index format version: {version}"
+        )
+
     record_count = struct.unpack_from("<Q", header, 16)[0]
 
     record_size = struct.unpack_from("<I", header, 24)[0]
 
+    if record_size != RECORD_SIZE:
+        raise RuntimeError(
+            f"Unsupported record size: {record_size}"
+        )
+
     header_size = struct.unpack_from("<I", header, 28)[0]
+
+    if header_size != HEADER_SIZE:
+        raise RuntimeError(
+            f"Unsupported header size: {header_size}"
+        )
 
     build_time = struct.unpack_from("<Q", header, 32)[0]
 
