@@ -18,9 +18,8 @@ from inatlookup import (
 
 
 BIN_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "data",
-    "inatlookup.bin"
+    os.path.dirname(os.path.abspath(__file__)),
+    "test_index.bin"
 )
 
 
