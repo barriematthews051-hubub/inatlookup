@@ -17,6 +17,7 @@ DEFAULT_INDEX = os.path.join(
 
 DEFAULT_OUTPUT = "inatlookup_results.csv"
 
+BATCH_PROGRESS_INTERVAL = 10000
 
 @dataclass
 class BatchResult:
@@ -144,6 +145,9 @@ def batch_lookup(lookup, input_file):
                 continue
 
             total += 1
+
+            if total % BATCH_PROGRESS_INTERVAL == 0:
+                print(f"Processing: {total:,} records...")
 
             photo_id = extract_photo_id(text)
 
