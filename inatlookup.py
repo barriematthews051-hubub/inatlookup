@@ -29,6 +29,9 @@ class BatchResult:
     found: int
     not_found: int
     unique_observations: int
+    api_lookups: int
+    api_successes: int
+    api_failures: int
     rows: list
 
 
@@ -106,8 +109,49 @@ def lookup_photo(lookup, text):
         print("API lookup failed.")
         print(e)
 
+def lookup_observation_api(obs_uuid):
+    """
+    Look up observation details from the iNaturalist API.
 
-def batch_lookup(lookup, input_file):
+    Returns a dictionary containing observation_id and
+    observation_url, or None if the API lookup fails.
+    """
+
+    try:
+
+        r = requests.get(
+            "https://api.inaturalist.org/v1/observations",
+            params={
+                "uuid": obs_uuid,
+                "per_page": 1
+            },
+            timeout=30
+        )
+
+        r.raise_for_status()
+
+        results = r.json()["results"]
+
+        if not results:
+            return None
+
+        obs = results[0]
+
+        return {
+            "observation_id": obs["id"],
+            "observation_url": obs["uri"]
+        }
+
+    except (
+        requests.RequestException,
+        KeyError,
+        IndexError,
+        TypeError,
+    ):
+
+        return None
+
+def batch_lookup(lookup, input_file, use_api=False):
     """
     Look up photo IDs from a text file.
 
@@ -123,6 +167,11 @@ def batch_lookup(lookup, input_file):
     index_lookups = 0
     found = 0
     not_found = 0
+    api_lookups = 0
+    api_successes = 0
+    api_failures = 0
+    
+    api_cache = {}
 
     unique_photo_ids = set()
     observations = set()
@@ -150,6 +199,7 @@ def batch_lookup(lookup, input_file):
                 print(f"Processing: {total:,} records...")
 
             photo_id = extract_photo_id(text)
+            api_result = None
 
             if photo_id is None:
 
@@ -160,7 +210,9 @@ def batch_lookup(lookup, input_file):
                         "input": text,
                         "photo_id": "",
                         "observation_uuid": "",
-                        "status": "invalid input"
+                        "status": "invalid input",
+                        "observation_id": "",
+                        "observation_url": "",
                     }
                 )
 
@@ -188,7 +240,9 @@ def batch_lookup(lookup, input_file):
                         "input": text,
                         "photo_id": photo_id,
                         "observation_uuid": "",
-                        "status": "not found"
+                        "status": "not found",
+                        "observation_id": "",
+                        "observation_url": "",
                     }
                 )
 
@@ -197,12 +251,43 @@ def batch_lookup(lookup, input_file):
             found += 1
             observations.add(obs_uuid)
 
+            if use_api:
+
+                if obs_uuid in api_cache:
+
+                    api_result = api_cache[obs_uuid]
+
+                else:
+
+                    api_lookups += 1
+
+                    api_result = lookup_observation_api(
+                        obs_uuid
+                    )
+
+                    api_cache[obs_uuid] = api_result
+
+                    if api_result is None:
+                        api_failures += 1
+                    else:
+                        api_successes += 1
+
             rows.append(
                 {
                     "input": text,
                     "photo_id": photo_id,
                     "observation_uuid": obs_uuid,
-                    "status": "found"
+                    "status": "found",
+                    "observation_id": (
+                        api_result["observation_id"]
+                        if api_result
+                        else ""
+                    ),
+                    "observation_url": (
+                        api_result["observation_url"]
+                        if api_result
+                        else ""
+                    )
                 }
             )
 
@@ -215,11 +300,14 @@ def batch_lookup(lookup, input_file):
         found=found,
         not_found=not_found,
         unique_observations=len(observations),
+        api_lookups=api_lookups,
+        api_successes=api_successes,
+        api_failures=api_failures,
         rows=rows
     )
 
 
-def write_batch_csv(result, output_file):
+def write_batch_csv(result, output_file, include_api=False):
     """
     Write a BatchResult to a CSV file.
     """
@@ -231,18 +319,44 @@ def write_batch_csv(result, output_file):
         encoding="utf-8"
     ) as f:
 
+        fieldnames = [
+            "input",
+            "photo_id",
+            "observation_uuid",
+            "status"
+        ]
+
+        if include_api:
+
+            fieldnames.extend(
+                [
+                    "observation_id",
+                    "observation_url"
+                ]
+            )
+
         writer = csv.DictWriter(
             f,
-            fieldnames=[
-                "input",
-                "photo_id",
-                "observation_uuid",
-                "status"
-            ]
+            fieldnames=fieldnames
         )
 
         writer.writeheader()
-        writer.writerows(result.rows)
+        
+        if include_api:
+
+            writer.writerows(result.rows)
+
+        else:
+
+            for row in result.rows:
+
+                writer.writerow(
+                    {
+                        key: row[key]
+                        for key in fieldnames
+                    }
+                )
+
 
 
 def print_batch_summary(result, output_file):
@@ -261,6 +375,9 @@ def print_batch_summary(result, output_file):
     print(f"Found in index     : {result.found:,}")
     print(f"Not found          : {result.not_found:,}")
     print(f"Unique observations: {result.unique_observations:,}")
+    print(f"API lookups        : {result.api_lookups:,}")
+    print(f"API successes      : {result.api_successes:,}")
+    print(f"API failures       : {result.api_failures:,}")
     print()
     print("Results written to:")
     print(output_file)
@@ -295,6 +412,12 @@ def main():
         "-o",
         default=DEFAULT_OUTPUT,
         help="Output CSV filename for batch mode"
+    )
+
+    parser.add_argument(
+        "--api",
+        action="store_true",
+        help="Enrich batch results using the iNaturalist API"
     )
 
     parser.add_argument(
@@ -357,12 +480,14 @@ def main():
 
         result = batch_lookup(
             lookup,
-            args.photo
+            args.photo,
+            use_api=args.api
         )
 
         write_batch_csv(
             result,
-            args.output
+            args.output,
+            include_api=args.api
         )
 
         print_batch_summary(

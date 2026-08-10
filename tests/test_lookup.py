@@ -3,6 +3,8 @@ import sys
 import tempfile
 import csv
 import struct
+import requests
+from unittest.mock import patch
 
 sys.path.insert(
     0,
@@ -10,10 +12,12 @@ sys.path.insert(
 )
 
 from lookup import InatLookup
+
 from inatlookup import (
     extract_photo_id,
     batch_lookup,
-    write_batch_csv
+    write_batch_csv,
+    lookup_observation_api
 )
 
 
@@ -253,6 +257,190 @@ def test_duplicate_cache():
         print("PASS: duplicate lookup cache")
 
 
+def test_api_lookup_success():
+
+    fake_response = {
+        "results": [
+            {
+                "id": 254368720,
+                "uri": "https://www.inaturalist.org/observations/254368720"
+            }
+        ]
+    }
+
+    with patch(
+        "inatlookup.requests.get"
+    ) as mock_get:
+
+        mock_get.return_value.json.return_value = fake_response
+        mock_get.return_value.raise_for_status.return_value = None
+
+        result = lookup_observation_api(
+            KNOWN_UUID
+        )
+
+    assert result["observation_id"] == 254368720
+
+    assert result["observation_url"] == (
+        "https://www.inaturalist.org/observations/254368720"
+    )
+
+    mock_get.assert_called_once()
+
+    print("PASS: API lookup success")
+
+def test_api_lookup_failure():
+
+    with patch(
+        "inatlookup.requests.get"
+    ) as mock_get:
+
+        mock_get.side_effect = requests.RequestException(
+            "Test API failure"
+        )
+
+        result = lookup_observation_api(
+            KNOWN_UUID
+        )
+
+    assert result is None
+
+    mock_get.assert_called_once()
+
+    print("PASS: API lookup failure")
+
+def test_batch_api_enrichment():
+
+    input_text = (
+        "455606536\n"
+        "455606536\n"
+        "999999999999\n"
+    )
+
+    fake_api_result = {
+        "observation_id": 254368720,
+        "observation_url":
+            "https://www.inaturalist.org/observations/254368720"
+    }
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
+        input_file = os.path.join(
+            temp_dir,
+            "photos.txt"
+        )
+
+        with open(
+            input_file,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            f.write(input_text)
+
+        lookup = CountingLookup()
+
+        with patch(
+            "inatlookup.lookup_observation_api"
+        ) as mock_api:
+
+            mock_api.return_value = fake_api_result
+
+            result = batch_lookup(
+                lookup,
+                input_file,
+                use_api=True
+            )
+
+        assert result.total == 3
+        assert result.valid == 3
+        assert result.invalid == 0
+        assert result.unique_photos == 2
+        assert result.index_lookups == 2
+        assert result.found == 2
+        assert result.not_found == 1
+        assert result.unique_observations == 1
+
+        assert result.api_lookups == 1
+        assert result.api_successes == 1
+        assert result.api_failures == 0
+
+        assert lookup.calls == 2
+
+        assert mock_api.call_count == 1
+
+        assert result.rows[0]["observation_id"] == 254368720
+        assert result.rows[0]["observation_url"] == (
+            "https://www.inaturalist.org/observations/254368720"
+        )
+
+        assert result.rows[1]["observation_id"] == 254368720
+        assert result.rows[1]["observation_url"] == (
+            "https://www.inaturalist.org/observations/254368720"
+        )
+
+        assert result.rows[2]["observation_id"] == ""
+        assert result.rows[2]["observation_url"] == ""
+
+    print("PASS: batch API enrichment")
+
+
+def test_api_csv_output():
+
+    result = type(
+        "TestResult",
+        (),
+        {
+            "rows": [
+                {
+                    "input": "455606536",
+                    "photo_id": 455606536,
+                    "observation_uuid": KNOWN_UUID,
+                    "status": "found",
+                    "observation_id": 254368720,
+                    "observation_url":
+                        "https://www.inaturalist.org/observations/254368720"
+                }
+            ]
+        }
+    )()
+
+    with tempfile.TemporaryDirectory() as temp_dir:
+
+        output_file = os.path.join(
+            temp_dir,
+            "results.csv"
+        )
+
+        write_batch_csv(
+            result,
+            output_file,
+            include_api=True
+        )
+
+        with open(
+            output_file,
+            "r",
+            encoding="utf-8",
+            newline=""
+        ) as f:
+
+            rows = list(csv.DictReader(f))
+
+        assert len(rows) == 1
+
+        assert rows[0]["input"] == "455606536"
+        assert rows[0]["photo_id"] == "455606536"
+        assert rows[0]["observation_uuid"] == KNOWN_UUID
+        assert rows[0]["status"] == "found"
+        assert rows[0]["observation_id"] == "254368720"
+        assert rows[0]["observation_url"] == (
+            "https://www.inaturalist.org/observations/254368720"
+        )
+
+    print("PASS: API CSV output")
+
+
 def test_lookup_context_manager():
 
     with InatLookup(BIN_FILE) as lookup:
@@ -417,6 +605,10 @@ if __name__ == "__main__":
     test_invalid_input()
     test_batch_lookup()
     test_duplicate_cache()
+    test_api_lookup_success()
+    test_api_lookup_failure()
+    test_batch_api_enrichment()
+    test_api_csv_output()
     test_lookup_context_manager()
     test_invalid_header_version()
     test_invalid_record_size()
