@@ -12,6 +12,7 @@ sys.path.insert(
 )
 
 from lookup import InatLookup
+from header import build_header
 
 from inatlookup import (
     extract_photo_id,
@@ -455,6 +456,183 @@ def test_lookup_context_manager():
     print("PASS: lookup context manager")
 
 
+def test_valid_index_exact_length():
+
+    expected_size = 128 + (5 * 24)
+
+    assert os.path.getsize(BIN_FILE) == expected_size
+
+    with InatLookup(BIN_FILE) as lookup:
+        assert lookup.records == 5
+
+    print("PASS: valid index exact length")
+
+
+def test_truncated_final_record():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(build_header(1))
+        f.write(b"\0" * 23)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected index size error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Index file size does not match header: "
+                "expected 152 bytes, found 151 bytes."
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: truncated final record")
+
+
+def test_file_shorter_than_declared_record_count():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(build_header(2))
+        f.write(b"\0" * 24)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected index size error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Index file size does not match header: "
+                "expected 176 bytes, found 152 bytes."
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: file shorter than declared record count")
+
+
+def test_file_longer_than_declared_record_count():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(build_header(1))
+        f.write(b"\0" * 25)
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected index size error"
+
+        except RuntimeError as e:
+            assert str(e) == (
+                "Index file size does not match header: "
+                "expected 152 bytes, found 153 bytes."
+            )
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: file longer than declared record count")
+
+
+def test_invalid_magic():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(b"NOTVALID" + (b"\0" * 120))
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected invalid magic error"
+
+        except RuntimeError as e:
+            assert str(e) == "Not a valid inatlookup index."
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: invalid magic")
+
+
+def test_incomplete_header():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(b"INATLOOK")
+
+    try:
+
+        try:
+            InatLookup(filename)
+            assert False, "Expected incomplete header error"
+
+        except RuntimeError as e:
+            assert str(e) == "Header is incomplete."
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: incomplete header")
+
+
+def test_zero_record_index():
+
+    with tempfile.NamedTemporaryFile(
+        mode="w+b",
+        delete=False
+    ) as f:
+
+        filename = f.name
+        f.write(build_header(0))
+
+    try:
+
+        with InatLookup(filename) as lookup:
+            assert lookup.records == 0
+            assert lookup.find(KNOWN_PHOTO_ID) is None
+
+    finally:
+
+        os.remove(filename)
+
+    print("PASS: zero-record index")
+
+
 def test_invalid_header_version():
 
     with tempfile.NamedTemporaryFile(
@@ -610,6 +788,13 @@ if __name__ == "__main__":
     test_batch_api_enrichment()
     test_api_csv_output()
     test_lookup_context_manager()
+    test_valid_index_exact_length()
+    test_truncated_final_record()
+    test_file_shorter_than_declared_record_count()
+    test_file_longer_than_declared_record_count()
+    test_invalid_magic()
+    test_incomplete_header()
+    test_zero_record_index()
     test_invalid_header_version()
     test_invalid_record_size()
     test_invalid_header_size()

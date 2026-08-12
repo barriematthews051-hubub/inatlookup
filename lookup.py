@@ -1,3 +1,4 @@
+import os
 import struct
 import uuid
 
@@ -20,6 +21,19 @@ class InatLookup:
         self.record_size = info["record_size"]
         self.header_size = info["header_size"]
         self.build_time = info["build_time"]
+
+        expected_size = self.header_size + (
+            self.records * self.record_size
+        )
+        actual_size = os.fstat(self.f.fileno()).st_size
+
+        if actual_size != expected_size:
+            self.f.close()
+            raise RuntimeError(
+                "Index file size does not match header: "
+                f"expected {expected_size} bytes, "
+                f"found {actual_size} bytes."
+            )
 
     def close(self):
         self.f.close()
