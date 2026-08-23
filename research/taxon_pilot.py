@@ -1,0 +1,813 @@
+import argparse
+import csv
+import json
+import os
+import random
+import re
+import time
+from collections import defaultdict
+from datetime import date, datetime, timedelta
+
+import requests
+
+
+API_URL = "https://api.inaturalist.org/v1/observations"
+
+REQUEST_DELAY = 1.0
+PER_PAGE = 200
+
+DATA_DIR = "research/data"
+CACHE_DIR = "research/cache"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description=(
+            "Build a reproducible stratified "
+            "iNaturalist taxon pilot sample."
+        )
+    )
+
+    parser.add_argument(
+        "--taxon-id",
+        type=int,
+        required=True,
+        help="iNaturalist taxon ID.",
+    )
+
+    parser.add_argument(
+        "--taxon-name",
+        required=True,
+        help="Taxon name, e.g. Syrphidae.",
+    )
+
+    parser.add_argument(
+        "--sample-size",
+        type=int,
+        default=500,
+        help="Total sample size. Default: 500.",
+    )
+
+    parser.add_argument(
+        "--start-date",
+        default="2025-01-01",
+        help="Start creation date YYYY-MM-DD.",
+    )
+
+    parser.add_argument(
+        "--end-date",
+        default="2025-06-30",
+        help="End creation date YYYY-MM-DD.",
+    )
+
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help=(
+            "Random seed. "
+            "Defaults to taxon ID."
+        ),
+    )
+
+    return parser.parse_args()
+
+
+def parse_date(text):
+    return datetime.strptime(
+        text,
+        "%Y-%m-%d"
+    ).date()
+
+
+def slugify(text):
+    text = text.strip().lower()
+
+    text = re.sub(
+        r"[^a-z0-9]+",
+        "_",
+        text
+    )
+
+    return text.strip("_")
+
+
+def api_get(params):
+    response = requests.get(
+        API_URL,
+        params=params,
+        timeout=60
+    )
+
+    response.raise_for_status()
+
+    data = response.json()
+
+    time.sleep(
+        REQUEST_DELAY
+    )
+
+    return data
+
+
+def month_ranges(
+    start_date,
+    end_date
+):
+    current = date(
+        start_date.year,
+        start_date.month,
+        1
+    )
+
+    while current <= end_date:
+
+        if current.month == 12:
+            next_month = date(
+                current.year + 1,
+                1,
+                1
+            )
+        else:
+            next_month = date(
+                current.year,
+                current.month + 1,
+                1
+            )
+
+        month_start = max(
+            current,
+            start_date
+        )
+
+        month_end = min(
+            next_month - timedelta(days=1),
+            end_date
+        )
+
+        yield (
+            month_start,
+            month_end
+        )
+
+        current = next_month
+
+
+def load_cache(filename):
+    if not os.path.exists(filename):
+        return {}
+
+    with open(
+        filename,
+        "r",
+        encoding="utf-8"
+    ) as f:
+        return json.load(f)
+
+
+def save_cache(
+    filename,
+    cache
+):
+    with open(
+        filename,
+        "w",
+        encoding="utf-8"
+    ) as f:
+
+        json.dump(
+            cache,
+            f,
+            indent=2,
+            sort_keys=True
+        )
+
+
+def get_daily_counts(
+    taxon_id,
+    month_start,
+    month_end,
+    cache_file
+):
+    cache = load_cache(
+        cache_file
+    )
+
+    counts = []
+
+    current = month_start
+
+    while current <= month_end:
+
+        key = current.isoformat()
+
+        if key in cache:
+
+            count = cache[key]
+            source = "cached"
+
+        else:
+
+            data = api_get(
+                {
+                    "taxon_id": taxon_id,
+                    "created_d1": key,
+                    "created_d2": key,
+                    "per_page": 1,
+                }
+            )
+
+            count = (
+                data["total_results"]
+            )
+
+            cache[key] = count
+
+            save_cache(
+                cache_file,
+                cache
+            )
+
+            source = "API"
+
+        counts.append(
+            {
+                "date": current,
+                "count": count,
+            }
+        )
+
+        print(
+            f"  {current}: "
+            f"{count:,} "
+            f"({source})"
+        )
+
+        current += timedelta(
+            days=1
+        )
+
+    return counts
+
+
+def choose_positions(
+    daily_counts,
+    target,
+    rng
+):
+    total = sum(
+        item["count"]
+        for item in daily_counts
+    )
+
+    if total < target:
+
+        raise RuntimeError(
+            f"Only {total:,} observations "
+            f"available for target "
+            f"sample of {target}."
+        )
+
+    positions = sorted(
+        rng.sample(
+            range(total),
+            target
+        )
+    )
+
+    selections = []
+
+    cumulative = 0
+    position_index = 0
+
+    for item in daily_counts:
+
+        day = item["date"]
+        count = item["count"]
+
+        day_end = (
+            cumulative + count
+        )
+
+        while (
+            position_index
+            < len(positions)
+            and positions[
+                position_index
+            ] < day_end
+        ):
+
+            position = (
+                positions[
+                    position_index
+                ]
+            )
+
+            offset_in_day = (
+                position - cumulative
+            )
+
+            page = (
+                offset_in_day
+                // PER_PAGE
+            ) + 1
+
+            offset_in_page = (
+                offset_in_day
+                % PER_PAGE
+            )
+
+            selections.append(
+                {
+                    "date": day,
+                    "page": page,
+                    "offset":
+                        offset_in_page,
+                }
+            )
+
+            position_index += 1
+
+        cumulative = day_end
+
+    return (
+        selections,
+        total
+    )
+
+
+def fetch_selected_observations(
+    taxon_id,
+    selections
+):
+    grouped = defaultdict(list)
+
+    for selection in selections:
+
+        key = (
+            selection["date"],
+            selection["page"],
+        )
+
+        grouped[key].append(
+            selection["offset"]
+        )
+
+    observations = []
+
+    request_groups = sorted(
+        grouped.items()
+    )
+
+    print(
+        "API pages to fetch:",
+        len(request_groups)
+    )
+
+    for request_number, (
+        (day, page),
+        offsets
+    ) in enumerate(
+        request_groups,
+        start=1
+    ):
+
+        print(
+            f"  Fetching "
+            f"{request_number}/"
+            f"{len(request_groups)}: "
+            f"{day} page {page}"
+        )
+
+        data = api_get(
+            {
+                "taxon_id":
+                    taxon_id,
+                "created_d1":
+                    day.isoformat(),
+                "created_d2":
+                    day.isoformat(),
+                "per_page":
+                    PER_PAGE,
+                "page":
+                    page,
+                "order_by":
+                    "id",
+                "order":
+                    "asc",
+            }
+        )
+
+        results = (
+            data["results"]
+        )
+
+        for offset in sorted(
+            offsets
+        ):
+
+            if offset >= len(
+                results
+            ):
+
+                raise RuntimeError(
+                    f"Sampling offset "
+                    f"{offset} missing "
+                    f"for {day}, "
+                    f"page {page}."
+                )
+
+            observations.append(
+                results[offset]
+            )
+
+    return observations
+
+
+def make_row(
+    observation,
+    sampling_month
+):
+    taxon = (
+        observation.get("taxon")
+        or {}
+    )
+
+    geojson = (
+        observation.get("geojson")
+    )
+
+    if geojson:
+
+        coordinates = (
+            geojson.get(
+                "coordinates",
+                ["", ""]
+            )
+        )
+
+        longitude = (
+            coordinates[0]
+        )
+
+        latitude = (
+            coordinates[1]
+        )
+
+    else:
+
+        latitude = ""
+        longitude = ""
+
+    return {
+        "sampling_month":
+            sampling_month,
+
+        "observation_id":
+            observation["id"],
+
+        "observation_uuid":
+            observation["uuid"],
+
+        "observer_id":
+            observation.get(
+                "user_id",
+                ""
+            ),
+
+        "created_at":
+            observation.get(
+                "created_at",
+                ""
+            ),
+
+        "observed_on":
+            observation.get(
+                "observed_on",
+                ""
+            ),
+
+        "taxon_id":
+            taxon.get(
+                "id",
+                ""
+            ),
+
+        "taxon_name":
+            taxon.get(
+                "name",
+                ""
+            ),
+
+        "taxon_rank":
+            taxon.get(
+                "rank",
+                ""
+            ),
+
+        "community_taxon_id":
+            observation.get(
+                "community_taxon_id",
+                ""
+            ),
+
+        "quality_grade":
+            observation.get(
+                "quality_grade",
+                ""
+            ),
+
+        "photo_count":
+            len(
+                observation.get(
+                    "photos",
+                    []
+                )
+            ),
+
+        "identifications_count":
+            observation.get(
+                "identifications_count",
+                ""
+            ),
+
+        "identification_agreements":
+            observation.get(
+                "num_identification_agreements",
+                ""
+            ),
+
+        "identification_disagreements":
+            observation.get(
+                "num_identification_disagreements",
+                ""
+            ),
+
+        "latitude":
+            latitude,
+
+        "longitude":
+            longitude,
+
+        "project_count":
+            len(
+                observation.get(
+                    "project_ids",
+                    []
+                )
+            ),
+    }
+
+
+def main():
+    args = parse_args()
+
+    start_date = parse_date(
+        args.start_date
+    )
+
+    end_date = parse_date(
+        args.end_date
+    )
+
+    if end_date < start_date:
+        raise RuntimeError(
+            "End date must not "
+            "precede start date."
+        )
+
+    seed = (
+        args.seed
+        if args.seed is not None
+        else args.taxon_id
+    )
+
+    rng = random.Random(
+        seed
+    )
+
+    os.makedirs(
+        DATA_DIR,
+        exist_ok=True
+    )
+
+    os.makedirs(
+        CACHE_DIR,
+        exist_ok=True
+    )
+
+    slug = slugify(
+        args.taxon_name
+    )
+
+    cache_file = os.path.join(
+        CACHE_DIR,
+        f"{args.taxon_id}"
+        "_daily_counts.json"
+    )
+
+    output_file = os.path.join(
+        DATA_DIR,
+        f"{slug}_pilot_"
+        f"{args.sample_size}.csv"
+    )
+
+    months = list(
+        month_ranges(
+            start_date,
+            end_date
+        )
+    )
+
+    if not months:
+        raise RuntimeError(
+            "No months in date range."
+        )
+
+    base = (
+        args.sample_size
+        // len(months)
+    )
+
+    remainder = (
+        args.sample_size
+        % len(months)
+    )
+
+    all_rows = []
+
+    print(
+        "Taxon:",
+        args.taxon_name
+    )
+
+    print(
+        "Taxon ID:",
+        args.taxon_id
+    )
+
+    print(
+        "Sample size:",
+        args.sample_size
+    )
+
+    print(
+        "Date range:",
+        start_date,
+        "to",
+        end_date
+    )
+
+    print(
+        "Random seed:",
+        seed
+    )
+
+    for index, (
+        month_start,
+        month_end
+    ) in enumerate(
+        months
+    ):
+
+        target = base
+
+        if index < remainder:
+            target += 1
+
+        print()
+        print(
+            f"{month_start:%B %Y}"
+        )
+
+        print(
+            "Target sample:",
+            target
+        )
+
+        print(
+            "Counting observations "
+            "by day..."
+        )
+
+        daily_counts = (
+            get_daily_counts(
+                args.taxon_id,
+                month_start,
+                month_end,
+                cache_file
+            )
+        )
+
+        (
+            selections,
+            month_total,
+        ) = choose_positions(
+            daily_counts,
+            target,
+            rng
+        )
+
+        print(
+            "Month population:",
+            f"{month_total:,}"
+        )
+
+        print(
+            "Fetching selected "
+            "observations..."
+        )
+
+        observations = (
+            fetch_selected_observations(
+                args.taxon_id,
+                selections
+            )
+        )
+
+        print(
+            "Selected:",
+            len(observations)
+        )
+
+        sampling_month = (
+            month_start.strftime(
+                "%Y-%m"
+            )
+        )
+
+        for observation in observations:
+
+            all_rows.append(
+                make_row(
+                    observation,
+                    sampling_month
+                )
+            )
+
+    fieldnames = [
+        "sampling_month",
+        "observation_id",
+        "observation_uuid",
+        "observer_id",
+        "created_at",
+        "observed_on",
+        "taxon_id",
+        "taxon_name",
+        "taxon_rank",
+        "community_taxon_id",
+        "quality_grade",
+        "photo_count",
+        "identifications_count",
+        "identification_agreements",
+        "identification_disagreements",
+        "latitude",
+        "longitude",
+        "project_count",
+    ]
+
+    with open(
+        output_file,
+        "w",
+        newline="",
+        encoding="utf-8"
+    ) as f:
+
+        writer = csv.DictWriter(
+            f,
+            fieldnames=fieldnames
+        )
+
+        writer.writeheader()
+        writer.writerows(
+            all_rows
+        )
+
+    unique_ids = {
+        row["observation_id"]
+        for row in all_rows
+    }
+
+    print()
+    print(
+        "Pilot sample complete"
+    )
+
+    print(
+        "Rows:",
+        len(all_rows)
+    )
+
+    print(
+        "Unique observations:",
+        len(unique_ids)
+    )
+
+    print(
+        "Output:",
+        output_file
+    )
+
+
+if __name__ == "__main__":
+    main()
