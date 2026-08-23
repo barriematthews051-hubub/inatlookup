@@ -58,8 +58,43 @@ def fmt_hours(value):
 
     return f"{value:.1f}"
 
+# Classify a value relative to the other pilot taxa.
+# The lowest third is Low, middle third Medium,
+# and highest third High.
+def relative_level(
+    value,
+    all_values,
+    reverse=False,
+):
+    ordered = sorted(all_values)
 
-def photo_group(count):
+    n = len(ordered)
+
+    low_cut = ordered[
+        n // 3
+    ]
+
+    high_cut = ordered[
+        (2 * n) // 3
+    ]
+
+    if value < low_cut:
+        level = "Low"
+    elif value < high_cut:
+        level = "Medium"
+    else:
+        level = "High"
+
+    if reverse:
+        if level == "Low":
+            return "High"
+        if level == "High":
+            return "Low"
+
+    return level
+
+
+def photo_group(count):    
     count = int(count)
 
     if count == 0:
@@ -387,10 +422,29 @@ def summarize_taxon(
             concentration[
                 "top_20_observation_coverage"
             ],
+
+        "friction_score":
+            (
+                percent(
+                    owner_changed,
+                    total,
+                )
+                + percent(
+                    withdrawn,
+                    total,
+                )
+                + percent(
+                    disagreement,
+                    total,
+                )
+                + percent(
+                    maverick,
+                    total,
+                )
+            ) / 4,
     }
 
-    for group in (
-        "0",
+    for group in (        "0",
         "1",
         "2",
         "3",
@@ -593,6 +647,119 @@ def print_concentration_table(
             f"{fmt_pct(row['top_5_observation_coverage']):>10}"
         )
 
+def print_hypothesis_table(
+    summaries
+):
+    attention_values = [
+        row["external_id_rate"]
+        for row in summaries
+    ]
+
+    resolution_values = [
+        row["species_given_external"]
+        for row in summaries
+    ]
+
+    speed_values = [
+        row["median_hours_first_external"]
+        for row in summaries
+    ]
+
+    concentration_values = [
+        row["top_5_id_share"]
+        for row in summaries
+    ]
+
+    friction_values = [
+        row["friction_score"]
+        for row in summaries
+    ]
+
+    print()
+    print(
+        "FAMILY-LEVEL HYPOTHESIS TABLE"
+    )
+
+    print(
+        "============================="
+    )
+
+    print()
+
+    header = (
+        f"{'Taxon':<16}"
+        f"{'Attention':>15}"
+        f"{'Resolution':>17}"
+        f"{'Speed':>16}"
+        f"{'Concentration':>19}"
+        f"{'Friction':>16}"
+    )
+
+    print(header)
+    print(
+        "-" * len(header)
+    )
+
+    for row in summaries:
+        attention_level = relative_level(
+            row["external_id_rate"],
+            attention_values,
+        )
+
+        resolution_level = relative_level(
+            row["species_given_external"],
+            resolution_values,
+        )
+
+        speed_level = relative_level(
+            row["median_hours_first_external"],
+            speed_values,
+            reverse=True,
+        )
+
+        concentration_level = relative_level(
+            row["top_5_id_share"],
+            concentration_values,
+        )
+
+        friction_level = relative_level(
+            row["friction_score"],
+            friction_values,
+        )
+
+        attention = (
+            f"{attention_level} "
+            f"{row['external_id_rate']:.1f}%"
+        )
+
+        resolution = (
+            f"{resolution_level} "
+            f"{row['species_given_external']:.1f}%"
+        )
+
+        speed = (
+            f"{speed_level} "
+            f"{row['median_hours_first_external']:.1f}h"
+        )
+
+        concentration = (
+            f"{concentration_level} "
+            f"{row['top_5_id_share']:.1f}%"
+        )
+
+        friction = (
+            f"{friction_level} "
+            f"{row['friction_score']:.1f}"
+        )
+
+        print(
+            f"{row['taxon']:<16}"
+            f"{attention:>15}"
+            f"{resolution:>17}"
+            f"{speed:>16}"
+            f"{concentration:>19}"
+            f"{friction:>16}"
+        )
 
 def write_csv(
     summaries
@@ -659,10 +826,13 @@ def main():
         summaries
     )
 
-    write_csv(
+    print_hypothesis_table(
         summaries
     )
 
+    write_csv(
+        summaries
+    )
 
 if __name__ == "__main__":
     main()
