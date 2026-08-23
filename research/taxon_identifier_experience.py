@@ -8,7 +8,6 @@ from collections import defaultdict
 
 import requests
 
-
 DATA_DIR = "research/data"
 CACHE_DIR = "research/cache"
 
@@ -18,6 +17,68 @@ API_URL = (
 )
 
 REQUEST_DELAY = 1.0
+
+
+
+def api_get(url, params, max_attempts=8):
+    for attempt in range(1, max_attempts + 1):
+        response = requests.get(
+            url,
+            params=params,
+            timeout=60,
+            headers={
+                "User-Agent":
+                    "inatlookup-research-pilot"
+            },
+        )
+
+        if response.status_code == 429:
+            retry_after = response.headers.get(
+                "Retry-After"
+            )
+
+            wait_seconds = 0
+
+            if retry_after:
+                try:
+                    wait_seconds = float(
+                        retry_after
+                    )
+                except ValueError:
+                    pass
+
+            if wait_seconds <= 0:
+                wait_seconds = min(
+                    60,
+                    5 * attempt
+                )
+
+            print(
+                f"    API throttled (429). "
+                f"Waiting {wait_seconds:.0f} "
+                "seconds before retry..."
+            )
+
+            time.sleep(wait_seconds)
+            continue
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        # Deliberately conservative because this
+        # script can issue hundreds of requests.
+        time.sleep(1.5)
+
+        return data
+
+    raise RuntimeError(
+        "API request failed after "
+        f"{max_attempts} attempts: "
+        f"{url} {params}"
+    )
+
+
 
 
 def parse_args():
@@ -149,15 +210,10 @@ def fetch_prior_experience(
             1,
     }
 
-    response = requests.get(
-        API_URL,
-        params=params,
-        timeout=60
+    data = api_get(
+    	"https://api.inaturalist.org/v1/identifications",
+    	params,
     )
-
-    response.raise_for_status()
-
-    data = response.json()
 
     total_at_time = (
         data["total_results"]

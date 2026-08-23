@@ -10,11 +10,11 @@ from datetime import date, datetime, timedelta
 
 import requests
 
-
 API_URL = "https://api.inaturalist.org/v1/observations"
 
-REQUEST_DELAY = 1.0
+REQUEST_DELAY = 1.25
 PER_PAGE = 200
+MAX_STANDARD_PAGE = 50
 
 DATA_DIR = "research/data"
 CACHE_DIR = "research/cache"
@@ -93,22 +93,74 @@ def slugify(text):
 
 
 def api_get(params):
-    response = requests.get(
-        API_URL,
-        params=params,
-        timeout=60
+    max_attempts = 8
+
+    for attempt in range(
+        1,
+        max_attempts + 1
+    ):
+        response = requests.get(
+            API_URL,
+            params=params,
+            timeout=60,
+            headers={
+                "User-Agent":
+                    "inatlookup-research-pilot"
+            },
+        )
+
+        if response.status_code == 429:
+
+            retry_after = (
+                response.headers.get(
+                    "Retry-After"
+                )
+            )
+
+            if retry_after:
+                try:
+                    wait_seconds = float(
+                        retry_after
+                    )
+                except ValueError:
+                    wait_seconds = 0
+            else:
+                wait_seconds = 0
+
+            if wait_seconds <= 0:
+                wait_seconds = min(
+                    60,
+                    5 * attempt
+                )
+
+            print(
+                "    API throttled "
+                f"(429). Waiting "
+                f"{wait_seconds:.0f} "
+                "seconds before retry..."
+            )
+
+            time.sleep(
+                wait_seconds
+            )
+
+            continue
+
+        response.raise_for_status()
+
+        data = response.json()
+
+        time.sleep(
+            REQUEST_DELAY
+        )
+
+        return data
+
+    raise RuntimeError(
+        "API request failed after "
+        f"{max_attempts} attempts: "
+        f"{params}"
     )
-
-    response.raise_for_status()
-
-    data = response.json()
-
-    time.sleep(
-        REQUEST_DELAY
-    )
-
-    return data
-
 
 def month_ranges(
     start_date,
@@ -336,6 +388,310 @@ def choose_positions(
     )
 
 
+def fetch_large_day_positions(
+    taxon_id,
+    day,
+    selections,
+):
+    """
+    Fetch selected positions from a day whose
+    results extend beyond the normal 10,000-result
+    pagination limit.
+
+    Instead of walking every page with id_above,
+    jump through the result set in 10,000-record
+    blocks. Within each block, ordinary page
+    pagination is used.
+    """
+
+    block_size = (
+        MAX_STANDARD_PAGE
+        * PER_PAGE
+    )
+
+    # Convert each requested page/offset into
+    # absolute zero-based position.
+    requested = []
+
+    for selection in selections:
+
+        absolute_position = (
+            (selection["page"] - 1)
+            * PER_PAGE
+            + selection["offset"]
+        )
+
+        block_index = (
+            absolute_position
+            // block_size
+        )
+
+        position_in_block = (
+            absolute_position
+            % block_size
+        )
+
+        relative_page = (
+            position_in_block
+            // PER_PAGE
+        ) + 1
+
+        relative_offset = (
+            position_in_block
+            % PER_PAGE
+        )
+
+        requested.append(
+            {
+                "absolute_position":
+                    absolute_position,
+
+                "block_index":
+                    block_index,
+
+                "relative_page":
+                    relative_page,
+
+                "relative_offset":
+                    relative_offset,
+            }
+        )
+
+    requested.sort(
+        key=lambda item:
+            item[
+                "absolute_position"
+            ]
+    )
+
+    max_block = max(
+        item["block_index"]
+        for item in requested
+    )
+
+    print(
+        "    Large day requires "
+        f"{max_block + 1} "
+        "10,000-record block(s)"
+    )
+
+    # boundary_ids[n] is the id_above value
+    # used to enter block n.
+    #
+    # Block 0 starts at the beginning, so None.
+    boundary_ids = {
+        0: None
+    }
+
+    current_boundary = None
+
+    for block_index in range(
+        1,
+        max_block + 1
+    ):
+
+        params = {
+            "taxon_id":
+                taxon_id,
+
+            "created_d1":
+                day.isoformat(),
+
+            "created_d2":
+                day.isoformat(),
+
+            "per_page":
+                PER_PAGE,
+
+            "page":
+                MAX_STANDARD_PAGE,
+
+            "order_by":
+                "id",
+
+            "order":
+                "asc",
+        }
+
+        if current_boundary is not None:
+            params[
+                "id_above"
+            ] = current_boundary
+
+        print(
+            "    Finding boundary "
+            f"for block "
+            f"{block_index}..."
+        )
+
+        data = api_get(
+            params
+        )
+
+        results = (
+            data["results"]
+        )
+
+        if not results:
+
+            raise RuntimeError(
+                "Could not establish "
+                f"block {block_index} "
+                f"for {day}."
+            )
+
+        current_boundary = (
+            results[-1]["id"]
+        )
+
+        boundary_ids[
+            block_index
+        ] = current_boundary
+
+        print(
+            "      Boundary ID:",
+            current_boundary
+        )
+
+    # Group requested observations by
+    # block and relative page.
+    page_groups = defaultdict(
+        list
+    )
+
+    for item in requested:
+
+        key = (
+            item["block_index"],
+            item["relative_page"],
+        )
+
+        page_groups[
+            key
+        ].append(
+            item
+        )
+
+    found = {}
+
+    for (
+        block_index,
+        relative_page
+    ) in sorted(
+        page_groups
+    ):
+
+        params = {
+            "taxon_id":
+                taxon_id,
+
+            "created_d1":
+                day.isoformat(),
+
+            "created_d2":
+                day.isoformat(),
+
+            "per_page":
+                PER_PAGE,
+
+            "page":
+                relative_page,
+
+            "order_by":
+                "id",
+
+            "order":
+                "asc",
+        }
+
+        boundary = (
+            boundary_ids[
+                block_index
+            ]
+        )
+
+        if boundary is not None:
+            params[
+                "id_above"
+            ] = boundary
+
+        print(
+            "    Fetching block "
+            f"{block_index + 1}, "
+            f"page {relative_page}"
+        )
+
+        data = api_get(
+            params
+        )
+
+        results = (
+            data["results"]
+        )
+
+        for item in page_groups[
+            (
+                block_index,
+                relative_page,
+            )
+        ]:
+
+            offset = (
+                item[
+                    "relative_offset"
+                ]
+            )
+
+            if offset >= len(
+                results
+            ):
+
+                raise RuntimeError(
+                    "Sampling offset "
+                    f"{offset} missing "
+                    f"for {day}, "
+                    f"block "
+                    f"{block_index + 1}, "
+                    f"page "
+                    f"{relative_page}."
+                )
+
+            found[
+                item[
+                    "absolute_position"
+                ]
+            ] = (
+                results[offset]
+            )
+
+    missing = [
+        item[
+            "absolute_position"
+        ]
+        for item in requested
+        if item[
+            "absolute_position"
+        ] not in found
+    ]
+
+    if missing:
+
+        raise RuntimeError(
+            "Could not resolve "
+            "large-day positions "
+            f"{missing} "
+            f"for {day}."
+        )
+
+    return [
+        found[
+            item[
+                "absolute_position"
+            ]
+        ]
+        for item in requested
+    ]
+
 def fetch_selected_observations(
     taxon_id,
     selections
@@ -344,82 +700,148 @@ def fetch_selected_observations(
 
     for selection in selections:
 
-        key = (
-            selection["date"],
-            selection["page"],
-        )
+        day = selection["date"]
 
-        grouped[key].append(
-            selection["offset"]
+        grouped[
+            day
+        ].append(
+            selection
         )
 
     observations = []
 
-    request_groups = sorted(
-        grouped.items()
+    days = sorted(
+        grouped
     )
 
     print(
-        "API pages to fetch:",
-        len(request_groups)
+        "Selected days to fetch:",
+        len(days)
     )
 
-    for request_number, (
-        (day, page),
-        offsets
-    ) in enumerate(
-        request_groups,
+    for day_number, day in enumerate(
+        days,
         start=1
     ):
 
+        day_selections = (
+            grouped[day]
+        )
+
+        max_page = max(
+            selection["page"]
+            for selection
+            in day_selections
+        )
+
         print(
-            f"  Fetching "
-            f"{request_number}/"
-            f"{len(request_groups)}: "
-            f"{day} page {page}"
+            f"  Day "
+            f"{day_number}/"
+            f"{len(days)}: "
+            f"{day} "
+            f"(max page {max_page})"
         )
 
-        data = api_get(
-            {
-                "taxon_id":
-                    taxon_id,
-                "created_d1":
-                    day.isoformat(),
-                "created_d2":
-                    day.isoformat(),
-                "per_page":
-                    PER_PAGE,
-                "page":
-                    page,
-                "order_by":
-                    "id",
-                "order":
-                    "asc",
-            }
-        )
-
-        results = (
-            data["results"]
-        )
-
-        for offset in sorted(
-            offsets
+        if (
+            max_page
+            > MAX_STANDARD_PAGE
         ):
 
-            if offset >= len(
-                results
+            print(
+                "    Using "
+                "id_above pagination"
+            )
+
+            day_observations = (
+                fetch_large_day_positions(
+                    taxon_id,
+                    day,
+                    day_selections
+                )
+            )
+
+            observations.extend(
+                day_observations
+            )
+
+            continue
+
+        page_groups = defaultdict(
+            list
+        )
+
+        for selection in day_selections:
+
+            page_groups[
+                selection["page"]
+            ].append(
+                selection["offset"]
+            )
+
+        for page in sorted(
+            page_groups
+        ):
+
+            offsets = (
+                page_groups[
+                    page
+                ]
+            )
+
+            print(
+                f"    Fetching "
+                f"page {page}"
+            )
+
+            data = api_get(
+                {
+                    "taxon_id":
+                        taxon_id,
+
+                    "created_d1":
+                        day.isoformat(),
+
+                    "created_d2":
+                        day.isoformat(),
+
+                    "per_page":
+                        PER_PAGE,
+
+                    "page":
+                        page,
+
+                    "order_by":
+                        "id",
+
+                    "order":
+                        "asc",
+                }
+            )
+
+            results = (
+                data["results"]
+            )
+
+            for offset in sorted(
+                offsets
             ):
 
-                raise RuntimeError(
-                    f"Sampling offset "
-                    f"{offset} missing "
-                    f"for {day}, "
-                    f"page {page}."
-                )
+                if offset >= len(
+                    results
+                ):
 
-            observations.append(
-                results[offset]
-            )
+                    raise RuntimeError(
+                        f"Sampling offset "
+                        f"{offset} missing "
+                        f"for {day}, "
+                        f"page {page}."
+                    )
+
+                observations.append(
+                    results[
+                        offset
+                    ]
+                )
 
     return observations
 
