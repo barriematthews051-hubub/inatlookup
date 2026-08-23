@@ -16,3 +16,10 @@ data/inatlookup.bin
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Research generated data and caches
+research/data/
+research/cache/
+research/*.csv
+research/*_cache.json
+research/*_daily_counts.json
