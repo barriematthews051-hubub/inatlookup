@@ -99,15 +99,40 @@ def api_get(params):
         1,
         max_attempts + 1
     ):
-        response = requests.get(
-            API_URL,
-            params=params,
-            timeout=60,
-            headers={
-                "User-Agent":
-                    "inatlookup-research-pilot"
-            },
-        )
+
+        try:
+            response = requests.get(
+                API_URL,
+                params=params,
+                timeout=90,
+                headers={
+                    "User-Agent": 
+			"inatlookup-research-pilot"
+                },
+            )
+
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            if attempt < max_attempts:
+                delay = min(
+                    5 * (2 ** (attempt - 1)),
+                    60,
+                )
+
+                print(
+                    f"    Network error: "
+                    f"{type(exc).__name__}; "
+                    f"retrying in {delay}s..."
+                )
+
+                time.sleep(delay)
+                continue
+
+            raise
+
+
 
         if response.status_code == 429:
 

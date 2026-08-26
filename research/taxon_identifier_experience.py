@@ -22,15 +22,37 @@ REQUEST_DELAY = 1.0
 
 def api_get(url, params, max_attempts=8):
     for attempt in range(1, max_attempts + 1):
-        response = requests.get(
-            url,
-            params=params,
-            timeout=60,
-            headers={
-                "User-Agent":
-                    "inatlookup-research-pilot"
-            },
-        )
+        try:
+            response = requests.get(
+                url,
+                params=params,
+                timeout=90,
+                headers={
+                    "User-Agent":
+                        "inatlookup-research-pilot"
+                },
+            )
+        except (
+            requests.exceptions.Timeout,
+            requests.exceptions.ConnectionError,
+        ) as exc:
+            if attempt == max_attempts:
+                raise
+
+            wait_seconds = min(
+                60,
+                5 * (2 ** (attempt - 1))
+            )
+
+            print(
+                f"    Network error "
+                f"({type(exc).__name__}). "
+                f"Retrying in {wait_seconds} "
+                "seconds..."
+            )
+
+            time.sleep(wait_seconds)
+            continue
 
         if response.status_code == 429:
             retry_after = response.headers.get(
