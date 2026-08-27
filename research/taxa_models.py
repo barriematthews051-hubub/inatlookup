@@ -35,6 +35,18 @@ TAXA = [
     "Nymphalidae",
     "Staphylinidae",
     "Asteraceae",
+    "Formicidae",
+    "Libellulidae",
+    "Orchidaceae",
+    "Poaceae",
+    "Russulaceae",
+    "Parmeliaceae",
+    "Salticidae",
+    "Lycosidae",
+    "Anatidae",
+    "Colubridae",
+    "Limacidae",
+    "Asteriidae",
 ]
 
 

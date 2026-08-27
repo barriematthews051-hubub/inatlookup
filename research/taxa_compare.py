@@ -15,8 +15,19 @@ TAXA = [
     ("Nymphalidae", 47922),
     ("Staphylinidae", 47951),
     ("Asteraceae", 47604),
+    ("Formicidae", 47336),
+    ("Libellulidae", 47819),
+    ("Orchidaceae", 47217),
+    ("Poaceae", 47434),
+    ("Russulaceae", 48340),
+    ("Parmeliaceae", 54321),
+    ("Salticidae", 48139),
+    ("Lycosidae", 47416),
+    ("Anatidae", 6912),
+    ("Colubridae", 26504),
+    ("Limacidae", 62471),
+    ("Asteriidae", 47671),
 ]
-
 
 def slugify(text):
     return text.strip().lower()
@@ -479,13 +490,12 @@ def summarize_taxon(
 
     return result
 
-
 def print_main_table(
     summaries
 ):
     print()
     print(
-        "SIX-TAXON COMPARISON"
+        "18-FAMILY COMPARISON"
     )
 
     print(
